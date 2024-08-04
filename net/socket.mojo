@@ -9,8 +9,11 @@ var SOCK_STREAM = 1
 var SOCKET_ERROR = -1
 
 trait Read:
-	fn read[size: Int](self, buffer: Pointer[SIMD[DType.uint8, size]]) raises
-		-> Int32:
+	fn read(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+		pass
+
+trait Write:
+	fn write(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
 		pass
 
 struct TcpListener(Stringable):
@@ -46,11 +49,18 @@ struct TcpConnection(Read):
 	var client: SockAddr
 	var fd: Int32
 
-	fn read[size: Int](self, buffer: Pointer[SIMD[DType.uint8, size]]) raises -> Int32:
+	fn read(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
 		return read(
 			self.fd,
-			buffer.bitcast[UInt8](),
-			size
+			buf,
+			count,
+		)
+
+	fn write(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+		return write(
+			self.fd,
+			buf,
+			count
 		)
 
 
@@ -116,8 +126,14 @@ fn accept(socket: Int32, sock_addr: UnsafePointer[sock_addr_in], sock_addr_len: 
 		raise Error(str("Accept Error: ") + str(errno()))
 	return ret
 
-fn read(socket: Int32, buffer: Pointer[UInt8], buffer_len: Int32) raises -> Int32:
-	var ret = external_call["read", Int](socket, buffer, buffer_len)
+fn read(socket: Int32, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+	var ret = external_call["read", Int](socket, buf, count)
 	if ret == SOCKET_ERROR:
 		raise Error(str("Read Error: ") + str(errno()))
+	return ret
+
+fn write(socket: Int32, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+	var ret = external_call["write", Int](socket, buf, count)
+	if ret == SOCKET_ERROR:
+		raise Error(str("Write Error: ") + str(errno()))
 	return ret
