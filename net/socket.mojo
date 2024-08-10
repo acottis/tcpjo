@@ -3,17 +3,23 @@ from sys import external_call
 from memory import Pointer, DTypePointer
 from libc import errno
 from utils import StaticTuple
+from bit import byte_swap
 
-var AF_INET = 2
-var SOCK_STREAM = 1
-var SOCKET_ERROR = -1
+alias AF_INET = 2
+alias SOCK_STREAM = 1
+alias SOCKET_ERROR = -1
+alias BACKLOG = 32
 
 trait Read:
-	fn read(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+	fn read(
+		self, inout buf: Pointer[UInt8], count: Int32
+	) raises -> Int32:
 		pass
 
 trait Write:
-	fn write(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+	fn write(
+		self, buf: DTypePointer[DType.uint8, 0], count: Int32
+	) raises -> Int32:
 		pass
 
 struct TcpListener(Stringable):
@@ -23,22 +29,25 @@ struct TcpListener(Stringable):
 		self.fd = socket(AF_INET, SOCK_STREAM, 0)
 		var sock_addr_in = sock_addr_in(sock_addr)
 		bind(self.fd, sock_addr_in, len(sock_addr_in))
-		listen(self.fd, 32)
+		listen(self.fd, BACKLOG)
 
 	fn accept(self) raises -> TcpConnection:
 		var addr = sock_addr_in()
-		var l = 16
+		var length = addr.__len__()
 		var addr_ptr = UnsafePointer.address_of(addr)
-		var addr_len = Pointer.address_of(l)
-		var conn_fd = accept(self.fd, addr_ptr, addr_len)
+		var addr_len = Pointer.address_of(length)
+
+		var client_fd = accept(self.fd, addr_ptr, addr_len)
+		var client_addr = Pointer
+			.address_of(addr.sin_addr.s_addr)
+			.bitcast[SIMD[DType.uint8, 4]]()[]
+
 		return TcpConnection(
 			SockAddr(
-				Pointer
-					.address_of(addr.sin_port)
-					.bitcast[SIMD[DType.uint8, 4]]()[],
+				client_addr,
 				addr.sin_port
 			),
-			conn_fd
+			client_fd
 		)
 
 	fn __str__(self) -> String:
@@ -49,7 +58,7 @@ struct TcpConnection(Read):
 	var client: SockAddr
 	var fd: Int32
 
-	fn read(self, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+	fn read(self, inout buf: Pointer[UInt8], count: Int32) raises -> Int32:
 		return read(
 			self.fd,
 			buf,
@@ -68,6 +77,10 @@ struct TcpConnection(Read):
 struct SockAddr:
 	var addr: SIMD[DType.uint8, 4]
 	var port: UInt16
+
+	fn __init__(inout self, addr: SIMD[DType.uint8, 4], port: UInt16):
+		self.addr = addr
+		self.port = byte_swap(port)
 
 fn debug_print(ptr: sock_addr_in):
 	var ptr_u8 = UnsafePointer.address_of(ptr).bitcast[UInt8]()
@@ -120,13 +133,13 @@ fn listen(socket: Int32, backlog: Int32) raises:
 	if ret == SOCKET_ERROR:
 		raise Error(str("Listen Error: ") + str(errno()))
 
-fn accept(socket: Int32, sock_addr: UnsafePointer[sock_addr_in], sock_addr_len: Pointer[Int]) raises -> Int:
+fn accept(socket: Int32, inout sock_addr: UnsafePointer[sock_addr_in], sock_addr_len: Pointer[Int]) raises -> Int:
 	var ret = external_call["accept", Int](socket, sock_addr, sock_addr_len)
 	if ret == SOCKET_ERROR:
 		raise Error(str("Accept Error: ") + str(errno()))
 	return ret
 
-fn read(socket: Int32, buf: DTypePointer[DType.uint8, 0], count: Int32) raises -> Int32:
+fn read(socket: Int32, inout buf: Pointer[UInt8], count: Int32) raises -> Int32:
 	var ret = external_call["read", Int](socket, buf, count)
 	if ret == SOCKET_ERROR:
 		raise Error(str("Read Error: ") + str(errno()))
